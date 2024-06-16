@@ -9,7 +9,7 @@ EditorBuildSettings:
     path: Assets/Scenes/Main Menu.unity
     guid: 956aa379b58f7d145a3a9d3fa23a4edb
   - enabled: 1
-    path: Assets/Scenes/SkiGame_Couse3_Session4_Optimization.unity
+    path: Assets/Scenes/Level1.unity
     guid: 9a8ba000d6c97c0499ff8f5cb512095c
   - enabled: 1
     path: Assets/Scenes/ExampleTitleScreen.unity

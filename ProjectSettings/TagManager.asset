@@ -8,6 +8,7 @@ TagManager:
   - Ramp
   - Rock
   - optionScreen
+  - IcePatch
   layers:
   - Default
   - TransparentFX

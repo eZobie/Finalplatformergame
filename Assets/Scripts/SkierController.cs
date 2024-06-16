@@ -2,6 +2,7 @@
 using System.Collections;
 
 [RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(AudioSource))]
 public class SkierController : MonoBehaviour
 {
     public float initialSpeed = 5f;
@@ -14,12 +15,13 @@ public class SkierController : MonoBehaviour
     public float raycastDistance = 1f;
     public float collisionSpeedReduction = 2f;
     public float knockbackForce = 10f;
-    public float knockbackDuration = 0.5f;
+    public float knockbackDuration = 0.7f;
     public AudioClip collisionSound;
     public float screenShakeDuration = 0.2f;
     public float screenShakeMagnitude = 0.1f;
 
     private Rigidbody rb;
+    private Vector3 initialForwardDirection;
     private Vector3 forwardDirection;
     private float currentSpeed;
     private bool isGrounded;
@@ -27,25 +29,54 @@ public class SkierController : MonoBehaviour
     private bool isKnockedBack;
     private float boostTimer;
     private AudioSource audioSource;
-    private ScreenShake screenShake;
+    private SimpleScreenShake screenShake; // Reference to SimpleScreenShake
+    private bool isControllable = true;
+
+    // Reference to the skiing sound
+    public AudioClip skiingSound;
+    private AudioSource skiingAudioSource;
+    
+    // Volume for the skiing sound
+    [SerializeField]
+    private float skiingSoundVolume = 0.5f; // Adjust this value to make the sound quieter
+
+    private void OnEnable()
+    {
+        ObstacleCollisionEvent.OnObstacleCollision += HandleObstacleCollision;
+    }
+
+    private void OnDisable()
+    {
+        ObstacleCollisionEvent.OnObstacleCollision -= HandleObstacleCollision;
+    }
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
         audioSource = GetComponent<AudioSource>();
-        screenShake = Camera.main.GetComponent<ScreenShake>();
+        screenShake = Camera.main.GetComponent<SimpleScreenShake>(); // Get the SimpleScreenShake component from the main camera
+
+        // Setup skiing audio source
+        skiingAudioSource = gameObject.AddComponent<AudioSource>();
+        skiingAudioSource.clip = skiingSound;
+        skiingAudioSource.loop = true; // Loop the skiing sound
+        skiingAudioSource.playOnAwake = false; // Do not play on awake
+        skiingAudioSource.volume = skiingSoundVolume; // Set the volume for the skiing sound
+
+        initialForwardDirection = transform.forward;
         forwardDirection = transform.forward;
         currentSpeed = initialSpeed;
     }
 
     void Update()
     {
-        if (!isKnockedBack)
+        if (!isKnockedBack && isControllable)
         {
             HandleInput();
         }
         HandleMovement();
         HandleBoost();
+        HandleSkiingSound(); // Add this to manage the skiing sound
     }
 
     private void HandleInput()
@@ -93,11 +124,31 @@ public class SkierController : MonoBehaviour
         }
     }
 
+    private void HandleSkiingSound()
+    {
+        if (isGrounded && currentSpeed > 0f)
+        {
+            if (!skiingAudioSource.isPlaying)
+            {
+                skiingAudioSource.Play();
+            }
+        }
+        else
+        {
+            if (skiingAudioSource.isPlaying)
+            {
+                skiingAudioSource.Stop();
+            }
+        }
+    }
+
     private void RotateSkier(Vector3 direction)
     {
-        float angle = Vector3.SignedAngle(transform.forward, direction, Vector3.up);
-        angle = Mathf.Clamp(angle, -maxTurnAngle, maxTurnAngle);
-        Quaternion targetRotation = Quaternion.Euler(0f, angle, 0f) * transform.rotation;
+        float angleToInitial = Vector3.SignedAngle(initialForwardDirection, transform.forward, Vector3.up);
+        float targetAngle = Vector3.SignedAngle(transform.forward, direction, Vector3.up);
+        float newAngle = Mathf.Clamp(angleToInitial + targetAngle, -maxTurnAngle, maxTurnAngle);
+
+        Quaternion targetRotation = Quaternion.Euler(0f, newAngle - angleToInitial, 0f) * transform.rotation;
         transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
         forwardDirection = transform.forward;
     }
@@ -140,55 +191,52 @@ public class SkierController : MonoBehaviour
         yield return new WaitForSeconds(5f);
     }
 
-    void OnCollisionEnter(Collision collision)
+    private void HandleObstacleCollision(Obstacle obstacle, SkierController player)
     {
-        if (collision.gameObject.CompareTag("Rock"))
+        if (player == this)
         {
-            StartCoroutine(HandleCollision());
+            StartCoroutine(KnockbackHandler.Instance.ApplyKnockback(player, knockbackForce, knockbackDuration));
+            SoundManager.Instance.PlaySound(collisionSound);
+            if (screenShake != null)
+            {
+                screenShake.Shake(screenShakeDuration, screenShakeMagnitude); // Trigger screen shake
+            }
         }
-    }
-
-    private IEnumerator HandleCollision()
-    {
-        // Play collision sound
-        if (collisionSound != null)
-        {
-            audioSource.PlayOneShot(collisionSound);
-        }
-
-        // Reduce speed
-        ReduceSpeed(collisionSpeedReduction);
-
-        // Knockback effect
-        isKnockedBack = true;
-        Vector3 knockbackDirection = (transform.position - rb.position).normalized;
-        float knockbackEndTime = Time.time + knockbackDuration;
-
-        // Start screen shake
-        if (screenShake != null)
-        {
-            StartCoroutine(screenShake.Shake(screenShakeDuration, screenShakeMagnitude));
-        }
-
-        while (Time.time < knockbackEndTime)
-        {
-            rb.velocity = knockbackDirection * knockbackForce;
-            yield return null;
-        }
-
-        isKnockedBack = false;
-        rb.velocity = Vector3.zero;
     }
 
     public void ReduceSpeed(float amount)
     {
-        initialSpeed = Mathf.Max(0, initialSpeed - amount);
+        currentSpeed = Mathf.Max(0, currentSpeed - amount);
+        Debug.Log("Speed reduced to: " + currentSpeed);
     }
 
     public void IncreaseSpeed(float amount)
     {
-        initialSpeed += amount;
-        Debug.Log("Speed increased to: " + initialSpeed);
+        currentSpeed = Mathf.Min(maxSpeed, currentSpeed + amount);
+        Debug.Log("Speed increased to: " + currentSpeed);
     }
- 
+
+    public void SetSpeed(float speed)
+    {
+        currentSpeed = Mathf.Clamp(speed, 0, maxSpeed);
+        Debug.Log("Speed set to: " + currentSpeed);
+    }
+
+    public float CurrentSpeed
+    {
+        get { return currentSpeed; }
+    }
+
+    public void SetControl(bool controllable)
+    {
+        isControllable = controllable;
+        if (!controllable)
+        {
+            Debug.Log("Player control disabled.");
+        }
+        else
+        {
+            Debug.Log("Player control enabled.");
+        }
+    }
 }
